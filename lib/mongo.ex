@@ -422,6 +422,8 @@ defmodule Mongo do
           {:error, %Mongo.Error{message: "command failed: #{reason}", code: error["code"]}}
         op_reply(docs: [%{"ok" => 1.0} = doc]) ->
           {:ok, doc}
+        op_reply(docs: [%{"ok" => 1} = doc]) ->
+          {:ok, doc}
         # TODO: Check if needed
         op_reply(docs: []) ->
           {:ok, nil}
