@@ -14,14 +14,35 @@ defmodule MONGOBATCH do
       Map.has_key?(submitteddocument, :deletes) ->
         {:delete, length(submitteddocument.deletes)}
     end
+
     # Save Collection value
     collection = submitteddocument[documentwritetype]
 
+    # Add _id values to inserted documents
+    {{insertedidlist, insertrecords}, submitteddocument} = if documentwritetype == :insert do
+      insertcandidates = submitteddocument.documents
+      insertrecordstuples = Enum.map(
+        insertcandidates,
+        fn(x) ->
+          insertid = Mongo.object_id
+          {%{_id: insertid}, Map.put(x, :_id, insertid)}
+        end
+        )
+      {insertedidlist, insertrecords} = Enum.unzip(insertrecordstuples)
+      # IO.puts("Insert Candidates:")
+      # IO.inspect(submitteddocument)
+      {{insertedidlist, insertrecords}, %{submitteddocument | documents: insertrecords}}
+    else
+      {{[], []}, submitteddocument}
+    end
+
     # Reorder fields to make sure command is first
-    submitteddocument = submitteddocument
-    |> Map.drop([documentwritetype])
-    |> Enum.into([])
-    |> List.insert_at(0, {documentwritetype, collection})
+    submitteddocument =
+      submitteddocument
+      |> Map.drop([documentwritetype])
+      |> Enum.into([])
+      |> List.insert_at(0, {documentwritetype, collection})
+      # |> IO.inspect
 
     # Execute proper Mongo command based on documentwritetype
     {:ok, mongowriteresult} = Mongo.command(mpid, submitteddocument)
@@ -29,50 +50,22 @@ defmodule MONGOBATCH do
     # Will probably have to undo this eventually
     # mongowriteresult
 
-    # ---Mock response generation code below---
-    # numdocs = length(submitteddocument.documents)
-    # %{
-    #   ok: 1,
-    #   n: numdocs,
-    #   writeErrors: [
-    #     %BatchWriteError{
-    #       code: 12345,
-    #       errInfo: %{info: "my error info 1"},
-    #       errmsg: "My Error Message 1",
-    #       index: 1
-    #     },
-    #     %BatchWriteError{
-    #       code: 67890,
-    #       errInfo: %{info: "my error info 2"},
-    #       errmsg: "My Error Message 2",
-    #       index: 2
-    #     },
-    #     %BatchWriteError{
-    #       code: 98765,
-    #       errInfo: %{info: "my error info 3"},
-    #       errmsg: "My Error Message 3",
-    #       index: 3
-    #     }
-    #   ],
-    #   writeConcernError: %BatchWriteConcernError{
-    #     code: 10987,
-    #     errInfo: %{info: "my write concern error info"},
-    #     errmsg: "My Write Concern Error Message"
-    #   },
-    #   nModified: 7,
-    #   upserted: [
-    #     %{index: 99, _id: "slslkdjfslkdjf"},
-    #     %{index: 100, _id: "ewrfgqerfv"},
-    #     %{index: 101, _id: "iuhjunihj"},
-    #   ]
-    # }
-    # ---Mock response generation code above---
-
     if mongowriteresult["ok"] == 1 do
       # Create optimistic base result array
-      resultstream = Stream.cycle([%{ok: 1}])
-      resultbaselist = Enum.take(resultstream, numwrittenitems)
-      resultbaselist = Enum.to_list(resultbaselist)
+      resultbaselist =
+        Stream.cycle([%{ok: 1}])
+        |> Enum.take(numwrittenitems)
+
+      resultbaselist = if documentwritetype == :insert do
+        Enum.zip(resultbaselist, insertedidlist)
+          |> Enum.map(
+            fn({k, v}) ->
+              Map.merge(k, v)
+            end
+          )
+      else
+        resultbaselist
+      end
 
       individualwriteresults = if (Map.has_key?(mongowriteresult, "writeErrors")) do
         # Extract error list
@@ -282,44 +275,44 @@ defmodule MONGOBATCH do
     Enum.concat(resultset)
   end
   #---------------------------------------------------------------------------#
-  def insert(mpid, insertdocument) do
-    # Get maxdocsize page breaks
-    fullpageindices = getpagebreaks(insertdocument.documents)
-
-    resultset = if Enum.empty?(fullpageindices) do
-      [submittomongo(mpid, insertdocument)]
-    else
-      inserttemplate = %{insertdocument | documents: []}
-      insertpages(mpid, inserttemplate, insertdocument.documents, fullpageindices, [])
-    end
-    combineresults(resultset)
-  end
+  # def insert(mpid, insertdocument) do
+  #   # Get maxdocsize page breaks
+  #   fullpageindices = getpagebreaks(insertdocument.documents)
+  #
+  #   resultset = if Enum.empty?(fullpageindices) do
+  #     [submittomongo(mpid, insertdocument)]
+  #   else
+  #     inserttemplate = %{insertdocument | documents: []}
+  #     insertpages(mpid, inserttemplate, insertdocument.documents, fullpageindices, [])
+  #   end
+  #   combineresults(resultset)
+  # end
   #---------------------------------------------------------------------------#
-  def update(mpid, updatedocument) do
-    # Get maxdocsize page breaks
-    fullpageindices = getpagebreaks(updatedocument.updates)
-
-    resultset = if Enum.empty?(fullpageindices) do
-      [submittomongo(mpid, updatedocument)]
-    else
-      updatetemplate = %{updatedocument | updates: []}
-      updatepages(mpid, updatetemplate, updatedocument.updates, fullpageindices, [])
-    end
-    combineresults(resultset)
-  end
+  # def update(mpid, updatedocument) do
+  #   # Get maxdocsize page breaks
+  #   fullpageindices = getpagebreaks(updatedocument.updates)
+  #
+  #   resultset = if Enum.empty?(fullpageindices) do
+  #     [submittomongo(mpid, updatedocument)]
+  #   else
+  #     updatetemplate = %{updatedocument | updates: []}
+  #     updatepages(mpid, updatetemplate, updatedocument.updates, fullpageindices, [])
+  #   end
+  #   combineresults(resultset)
+  # end
   #---------------------------------------------------------------------------#
-  def delete(mpid, deletedocument) do
-    # Get maxdocsize page breaks
-    fullpageindices = getpagebreaks(deletedocument.deletes)
-
-    resultset = if Enum.empty?(fullpageindices) do
-      [submittomongo(mpid, deletedocument)]
-    else
-      deletetemplate = %{deletedocument | deletes: []}
-      deletepages(mpid, deletetemplate, deletedocument.deletes, fullpageindices, [])
-    end
-    combineresults(resultset)
-  end
+  # def delete(mpid, deletedocument) do
+  #   # Get maxdocsize page breaks
+  #   fullpageindices = getpagebreaks(deletedocument.deletes)
+  #
+  #   resultset = if Enum.empty?(fullpageindices) do
+  #     [submittomongo(mpid, deletedocument)]
+  #   else
+  #     deletetemplate = %{deletedocument | deletes: []}
+  #     deletepages(mpid, deletetemplate, deletedocument.deletes, fullpageindices, [])
+  #   end
+  #   combineresults(resultset)
+  # end
   #---------------------------------------------------------------------------#
   def batchwrite(mpid, writedocument) do
     # Parse write document
@@ -346,6 +339,7 @@ defmodule MONGOBATCH do
         else
           insertpages(mpid, inserttemplate, insertdoclist, insertfullpageindices, [])
         end
+        # IO.inspect insertresultset
         %{insertresults: combineresults(insertresultset)}
       else
         %{}
