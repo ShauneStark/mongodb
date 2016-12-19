@@ -56,7 +56,7 @@ defmodule Mongo.Topology do
   @doc false
   def init(opts) do
     seeds = Keyword.get(opts, :seeds, [
-      Keyword.get(opts, :hostname, "localhost") <> ":" <> Keyword.get(opts, :port, "27017")
+      Keyword.get(opts, :hostname, "localhost") <> ":" <> to_string(Keyword.get(opts, :port, 27017))
     ])
     type = Keyword.get(opts, :type, :unknown)
     set_name = Keyword.get(opts, :set_name, nil)
@@ -111,7 +111,7 @@ defmodule Mongo.Topology do
   end
 
   # see https://github.com/mongodb/specifications/blob/master/source/server-discovery-and-monitoring/server-discovery-and-monitoring.rst#updating-the-topologydescription
-  def handle_call({:server_description, server_description}, _from, state) do
+  def handle_cast({:server_description, server_description}, state) do
     new_state = handle_server_description(state, server_description)
     if state.topology != new_state.topology do
       :ok = Mongo.Events.notify(%TopologyDescriptionChangedEvent{
@@ -119,9 +119,9 @@ defmodule Mongo.Topology do
         previous_description: state.topology,
         new_description: new_state.topology
       })
-      {:reply, :ok, new_state}
+      {:noreply, new_state}
     else
-      {:reply, :ok, new_state}
+      {:noreply, new_state}
     end
   end
 
@@ -188,6 +188,7 @@ defmodule Mongo.Topology do
       %{state | monitors: Map.put(state.monitors, address, pid),
         connection_pools: Map.put(state.connection_pools, address, pool)}
     end)
+
     Enum.reduce(removed, state, fn (address, state) ->
       :ok = Mongo.Events.notify(%ServerClosedEvent{address: address, topology_pid: self})
       :ok = Monitor.stop(state.monitors[address])

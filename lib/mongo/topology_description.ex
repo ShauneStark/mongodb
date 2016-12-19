@@ -52,8 +52,7 @@ defmodule Mongo.TopologyDescription do
 
   # steps 3-4
   def select_servers(topology, type, opts \\ []) do
-    read_preference = Keyword.get(opts, :read_preference,
-                                  ReadPreference.defaults)
+    read_preference = Keyword.get(opts, :read_preference, ReadPreference.defaults)
     if topology[:compatible] == false do
       {:error, :invalid_wire_version}
     else
@@ -302,8 +301,7 @@ defmodule Mongo.TopologyDescription do
     end
   end
 
-  defp update_topology(topology, :replica_set_no_primary, server_description,
-                       _) do
+  defp update_topology(topology, :replica_set_no_primary, server_description, _) do
     case server_description.type do
       type when type in [:unknown, :rs_ghost] ->
         {[], topology}
@@ -319,8 +317,7 @@ defmodule Mongo.TopologyDescription do
     end
   end
 
-  defp update_topology(topology, :replica_set_with_primary, server_description,
-                       _) do
+  defp update_topology(topology, :replica_set_with_primary, server_description, _) do
     case server_description.type do
       :unknown ->
         topology |> check_if_has_primary

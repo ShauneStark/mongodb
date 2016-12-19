@@ -22,10 +22,9 @@ defmodule MONGOBATCH do
     |> Map.drop([documentwritetype])
     |> Enum.into([])
     |> List.insert_at(0, {documentwritetype, collection})
-    |> IO.inspect
 
     # Execute proper Mongo command based on documentwritetype
-    {:ok, mongowriteresult} = IO.inspect Mongo.command(mpid, submitteddocument)
+    {:ok, mongowriteresult} = Mongo.command(mpid, submitteddocument)
     # Changing code to return matching list of status instead of mongo result
     # Will probably have to undo this eventually
     # mongowriteresult
@@ -347,7 +346,6 @@ defmodule MONGOBATCH do
         else
           insertpages(mpid, inserttemplate, insertdoclist, insertfullpageindices, [])
         end
-        IO.inspect insertresultset
         %{insertresults: combineresults(insertresultset)}
       else
         %{}
