@@ -3,7 +3,7 @@ defmodule MONGOBATCH do
 
   @maxdocsize 16000000
 
-  def submittomongo(submitteddocument) do
+  def submittomongo(mpid, submitteddocument) do
 
     # Determine write type
     {documentwritetype, numwrittenitems} = cond do
@@ -22,9 +22,6 @@ defmodule MONGOBATCH do
     |> Map.drop([documentwritetype])
     |> Enum.into([])
     |> List.insert_at(0, {documentwritetype, collection})
-
-    # Create connection to mongo
-    {:ok, mpid} = Mongo.start_link(hostname: "mongo1.hellodata.com", database: "test")
 
     # Execute proper Mongo command based on documentwritetype
     {:ok, mongowriteresult} = Mongo.command(mpid, submitteddocument)
@@ -155,7 +152,7 @@ defmodule MONGOBATCH do
     findpagebreaks(docsizes, [])
   end
   #---------------------------------------------------------------------------#
-  def insertpages(inserttemplate, documentlist, pageindexes, resultset) do
+  def insertpages(mpid, inserttemplate, documentlist, pageindexes, resultset) do
     # Seperate page of data
     sepindex = Enum.at(pageindexes, 0)
     {pageofdocs, restofdocs} = Enum.split(documentlist, sepindex)
@@ -164,22 +161,22 @@ defmodule MONGOBATCH do
     submissiondocument = %{inserttemplate | documents: pageofdocs}
 
     # Submit to Mongo
-    resultset = Enum.concat(resultset, [submittomongo(submissiondocument)])
+    resultset = Enum.concat(resultset, [submittomongo(mpid, submissiondocument)])
 
     # Now delete just used page index
     nextpageindexlist = Enum.drop(pageindexes, 1)
 
     if length(nextpageindexlist) > 0 do
       # Recurse on remaining docs
-      insertpages(inserttemplate, restofdocs, nextpageindexlist, resultset)
+      insertpages(mpid, inserttemplate, restofdocs, nextpageindexlist, resultset)
     else
       # Submit last page to mongo
       lastpagesubmission = %{inserttemplate | documents: restofdocs}
-      resultset = Enum.concat(resultset, [submittomongo(lastpagesubmission)])
+      resultset = Enum.concat(resultset, [submittomongo(mpid, lastpagesubmission)])
     end
   end
   #---------------------------------------------------------------------------#
-  def updatepages(updatetemplate, documentlist, pageindexes, resultset) do
+  def updatepages(mpid, updatetemplate, documentlist, pageindexes, resultset) do
     # Seperate page of data
     sepindex = Enum.at(pageindexes, 0)
     {pageofdocs, restofdocs} = Enum.split(documentlist, sepindex)
@@ -188,22 +185,22 @@ defmodule MONGOBATCH do
     submissiondocument = %{updatetemplate | updates: pageofdocs}
 
     # Submit to Mongo
-    resultset = Enum.concat(resultset, [submittomongo(submissiondocument)])
+    resultset = Enum.concat(resultset, [submittomongo(mpid, submissiondocument)])
 
     # Now delete just used page index
     nextpageindexlist = Enum.drop(pageindexes, 1)
 
     if length(nextpageindexlist) > 0 do
       # Recurse on remaining docs
-      updatepages(updatetemplate, restofdocs, nextpageindexlist, resultset)
+      updatepages(mpid, updatetemplate, restofdocs, nextpageindexlist, resultset)
     else
       # Submit last page to mongo
       lastpagesubmission = %{updatetemplate | updates: restofdocs}
-      resultset = Enum.concat(resultset, [submittomongo(lastpagesubmission)])
+      resultset = Enum.concat(resultset, [submittomongo(mpid, lastpagesubmission)])
     end
   end
   #---------------------------------------------------------------------------#
-  def deletepages(deletetemplate, documentlist, pageindexes, resultset) do
+  def deletepages(mpid, deletetemplate, documentlist, pageindexes, resultset) do
     # Seperate page of data
     sepindex = Enum.at(pageindexes, 0)
     {pageofdocs, restofdocs} = Enum.split(documentlist, sepindex)
@@ -212,18 +209,18 @@ defmodule MONGOBATCH do
     submissiondocument = %{deletetemplate | deletes: pageofdocs}
 
     # Submit to Mongo
-    resultset = Enum.concat(resultset, [submittomongo(submissiondocument)])
+    resultset = Enum.concat(resultset, [submittomongo(mpid, submissiondocument)])
 
     # Now delete just used page index
     nextpageindexlist = Enum.drop(pageindexes, 1)
 
     if length(nextpageindexlist) > 0 do
       # Recurse on remaining docs
-      deletepages(deletetemplate, restofdocs, nextpageindexlist, resultset)
+      deletepages(mpid, deletetemplate, restofdocs, nextpageindexlist, resultset)
     else
       # Submit last page to mongo
       lastpagesubmission = %{deletetemplate | deletes: restofdocs}
-      resultset = Enum.concat(resultset, [submittomongo(lastpagesubmission)])
+      resultset = Enum.concat(resultset, [submittomongo(mpid, lastpagesubmission)])
     end
   end
   #---------------------------------------------------------------------------#
@@ -285,46 +282,46 @@ defmodule MONGOBATCH do
     Enum.concat(resultset)
   end
   #---------------------------------------------------------------------------#
-  def insert(insertdocument) do
+  def insert(mpid, insertdocument) do
     # Get maxdocsize page breaks
     fullpageindices = getpagebreaks(insertdocument.documents)
 
     resultset = if Enum.empty?(fullpageindices) do
-      [submittomongo(insertdocument)]
+      [submittomongo(mpid, insertdocument)]
     else
       inserttemplate = %{insertdocument | documents: []}
-      insertpages(inserttemplate, insertdocument.documents, fullpageindices, [])
+      insertpages(mpid, inserttemplate, insertdocument.documents, fullpageindices, [])
     end
     combineresults(resultset)
   end
   #---------------------------------------------------------------------------#
-  def update(updatedocument) do
+  def update(mpid, updatedocument) do
     # Get maxdocsize page breaks
     fullpageindices = getpagebreaks(updatedocument.updates)
 
     resultset = if Enum.empty?(fullpageindices) do
-      [submittomongo(updatedocument)]
+      [submittomongo(mpid, updatedocument)]
     else
       updatetemplate = %{updatedocument | updates: []}
-      updatepages(updatetemplate, updatedocument.updates, fullpageindices, [])
+      updatepages(mpid, updatetemplate, updatedocument.updates, fullpageindices, [])
     end
     combineresults(resultset)
   end
   #---------------------------------------------------------------------------#
-  def delete(deletedocument) do
+  def delete(mpid, deletedocument) do
     # Get maxdocsize page breaks
     fullpageindices = getpagebreaks(deletedocument.deletes)
 
     resultset = if Enum.empty?(fullpageindices) do
-      [submittomongo(deletedocument)]
+      [submittomongo(mpid, deletedocument)]
     else
       deletetemplate = %{deletedocument | deletes: []}
-      deletepages(deletetemplate, deletedocument.deletes, fullpageindices, [])
+      deletepages(mpid, deletetemplate, deletedocument.deletes, fullpageindices, [])
     end
     combineresults(resultset)
   end
   #---------------------------------------------------------------------------#
-  def batchwrite(writedocument) do
+  def batchwrite(mpid, writedocument) do
     # Parse write document
     writecollection = writedocument.collection
     writeconcern = writedocument.writeConcern
@@ -344,9 +341,9 @@ defmodule MONGOBATCH do
       insertfullpageindices = getpagebreaks(insertdoclist)
       # Write inserts
       insertresultset = if Enum.empty?(insertfullpageindices) do
-        [submittomongo(%{inserttemplate | documents: insertdoclist})]
+        [submittomongo(mpid, %{inserttemplate | documents: insertdoclist})]
       else
-        insertpages(inserttemplate, insertdoclist, insertfullpageindices, [])
+        insertpages(mpid, inserttemplate, insertdoclist, insertfullpageindices, [])
       end
       insertfinalresult = combineresults(insertresultset)
 
@@ -358,9 +355,9 @@ defmodule MONGOBATCH do
       updatefullpageindices = getpagebreaks(updatedoclist)
       # Write updates
       updateresultset = if Enum.empty?(updatefullpageindices) do
-        [submittomongo(%{updatetemplate | updates: updatedoclist})]
+        [submittomongo(mpid, %{updatetemplate | updates: updatedoclist})]
       else
-        updatepages(updatetemplate, updatedoclist, updatefullpageindices, [])
+        updatepages(mpid, updatetemplate, updatedoclist, updatefullpageindices, [])
       end
       updatefinalresult = combineresults(updateresultset)
 
@@ -372,9 +369,9 @@ defmodule MONGOBATCH do
       deletefullpageindices = getpagebreaks(deletedoclist)
       # Write deletes
       deleteresultset = if Enum.empty?(deletefullpageindices) do
-        [submittomongo(%{deletetemplate | deletes: deletedoclist})]
+        [submittomongo(mpid, %{deletetemplate | deletes: deletedoclist})]
       else
-        deletepages(deletetemplate, deletedoclist, deletefullpageindices, [])
+        deletepages(mpid, deletetemplate, deletedoclist, deletefullpageindices, [])
       end
       deletefinalresult = combineresults(deleteresultset)
 
@@ -398,9 +395,9 @@ defmodule MONGOBATCH do
               insertfullpageindices = getpagebreaks(x.writes)
               # Write inserts
               insertresultset = if Enum.empty?(insertfullpageindices) do
-                [submittomongo(%{inserttemplate | documents: x.writes})]
+                [submittomongo(mpid, %{inserttemplate | documents: x.writes})]
               else
-                insertpages(inserttemplate, x.writes, insertfullpageindices, [])
+                insertpages(mpid, inserttemplate, x.writes, insertfullpageindices, [])
               end
               resultlist = Enum.concat(resultlist, combineresults(insertresultset))
 
@@ -413,9 +410,9 @@ defmodule MONGOBATCH do
               updatefullpageindices = getpagebreaks(x.writes)
               # Write updates
               updateresultset = if Enum.empty?(updatefullpageindices) do
-                [submittomongo(%{updatetemplate | updates: x.writes})]
+                [submittomongo(mpid, %{updatetemplate | updates: x.writes})]
               else
-                updatepages(updatetemplate, x.writes, updatefullpageindices, [])
+                updatepages(mpid, updatetemplate, x.writes, updatefullpageindices, [])
               end
               resultlist = Enum.concat(resultlist, combineresults(updateresultset))
 
@@ -428,9 +425,9 @@ defmodule MONGOBATCH do
               deletefullpageindices = getpagebreaks(x.writes)
               # Write deletes
               deleteresultset = if Enum.empty?(deletefullpageindices) do
-                [submittomongo(%{deletetemplate | deletes: x.writes})]
+                [submittomongo(mpid, %{deletetemplate | deletes: x.writes})]
               else
-                deletepages(deletetemplate, x.writes, deletefullpageindices, [])
+                deletepages(mpid, deletetemplate, x.writes, deletefullpageindices, [])
               end
               resultlist = Enum.concat(resultlist, combineresults(deleteresultset))
           end
