@@ -25,7 +25,7 @@ defmodule BatchInsert do
 end
 #---------------------------------------------------------------------------#
 defmodule BatchUpdateDocument do
-  defstruct q: %{}, u: %{}, multi: nil, upsert: nil
+  defstruct q: %{}, u: %{}, multi: false, upsert: false
 end
 #---------------------------------------------------------------------------#
 defmodule BatchUpdate do

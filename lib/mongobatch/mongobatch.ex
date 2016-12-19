@@ -22,9 +22,10 @@ defmodule MONGOBATCH do
     |> Map.drop([documentwritetype])
     |> Enum.into([])
     |> List.insert_at(0, {documentwritetype, collection})
+    |> IO.inspect
 
     # Execute proper Mongo command based on documentwritetype
-    {:ok, mongowriteresult} = Mongo.command(mpid, submitteddocument)
+    {:ok, mongowriteresult} = IO.inspect Mongo.command(mpid, submitteddocument)
     # Changing code to return matching list of status instead of mongo result
     # Will probably have to undo this eventually
     # mongowriteresult
@@ -84,8 +85,8 @@ defmodule MONGOBATCH do
           fn(x, resultcandidate) ->
             resultcandidate = List.replace_at(
               resultcandidate,
-              x.index,
-              %{ok: 0, code: x.code, errInfo: x.errInfo, errmsg: x.errmsg}
+              x["index"],
+              %{ok: 0, code: x["code"], errInfo: x["errInfo"], errmsg: x["errmsg"]}
             )
           end
         )
@@ -332,51 +333,61 @@ defmodule MONGOBATCH do
       # Sort by write type
       {insertdoclist, updatedoclist, deletedoclist} = BatchWriteSorter.sortunordered(writedocument.writes)
 
-      # Process inserts first
-      # Build insert document template
-      inserttemplate = %{BatchInsert.defaults() | insert: writecollection}
-      inserttemplate = %{inserttemplate | writeConcern: writeconcern}
-      inserttemplate = %{inserttemplate | ordered: writeorder}
-      # Get maxdocsize page breaks
-      insertfullpageindices = getpagebreaks(insertdoclist)
-      # Write inserts
-      insertresultset = if Enum.empty?(insertfullpageindices) do
-        [submittomongo(mpid, %{inserttemplate | documents: insertdoclist})]
+      result = if not Enum.empty? insertdoclist do
+        # Process inserts first
+        # Build insert document template
+        inserttemplate = %{BatchInsert.defaults() | insert: writecollection}
+        inserttemplate = %{inserttemplate | writeConcern: writeconcern}
+        inserttemplate = %{inserttemplate | ordered: writeorder}
+        # Get maxdocsize page breaks
+        insertfullpageindices = getpagebreaks(insertdoclist)
+        # Write inserts
+        insertresultset = if Enum.empty?(insertfullpageindices) do
+          [submittomongo(mpid, %{inserttemplate | documents: insertdoclist})]
+        else
+          insertpages(mpid, inserttemplate, insertdoclist, insertfullpageindices, [])
+        end
+        IO.inspect insertresultset
+        %{insertresults: combineresults(insertresultset)}
       else
-        insertpages(mpid, inserttemplate, insertdoclist, insertfullpageindices, [])
+        %{}
       end
-      insertfinalresult = combineresults(insertresultset)
 
-      # Process updates second
-      updatetemplate = %{BatchUpdate.defaults() | update: writecollection}
-      updatetemplate = %{updatetemplate | writeConcern: writeconcern}
-      updatetemplate = %{updatetemplate | ordered: writeorder}
-      # Get maxdocsize page breaks
-      updatefullpageindices = getpagebreaks(updatedoclist)
-      # Write updates
-      updateresultset = if Enum.empty?(updatefullpageindices) do
-        [submittomongo(mpid, %{updatetemplate | updates: updatedoclist})]
+      result = if not Enum.empty? updatedoclist do
+        # Process updates second
+        updatetemplate = %{BatchUpdate.defaults() | update: writecollection}
+        updatetemplate = %{updatetemplate | writeConcern: writeconcern}
+        updatetemplate = %{updatetemplate | ordered: writeorder}
+        # Get maxdocsize page breaks
+        updatefullpageindices = getpagebreaks(updatedoclist)
+        # Write updates
+        updateresultset = if Enum.empty?(updatefullpageindices) do
+          [submittomongo(mpid, %{updatetemplate | updates: updatedoclist})]
+        else
+          updatepages(mpid, updatetemplate, updatedoclist, updatefullpageindices, [])
+        end
+        Map.put(result, :updateresults, combineresults(updateresultset))
       else
-        updatepages(mpid, updatetemplate, updatedoclist, updatefullpageindices, [])
+        result
       end
-      updatefinalresult = combineresults(updateresultset)
 
-      # Process deletes last
-      deletetemplate = %{BatchDelete.defaults() | delete: writecollection}
-      deletetemplate = %{deletetemplate | writeConcern: writeconcern}
-      deletetemplate = %{deletetemplate | ordered: writeorder}
-      # Get maxdocsize page breaks
-      deletefullpageindices = getpagebreaks(deletedoclist)
-      # Write deletes
-      deleteresultset = if Enum.empty?(deletefullpageindices) do
-        [submittomongo(mpid, %{deletetemplate | deletes: deletedoclist})]
+      if not Enum.empty? deletedoclist do
+        # Process deletes last
+        deletetemplate = %{BatchDelete.defaults() | delete: writecollection}
+        deletetemplate = %{deletetemplate | writeConcern: writeconcern}
+        deletetemplate = %{deletetemplate | ordered: writeorder}
+        # Get maxdocsize page breaks
+        deletefullpageindices = getpagebreaks(deletedoclist)
+        # Write deletes
+        deleteresultset = if Enum.empty?(deletefullpageindices) do
+          [submittomongo(mpid, %{deletetemplate | deletes: deletedoclist})]
+        else
+          deletepages(mpid, deletetemplate, deletedoclist, deletefullpageindices, [])
+        end
+        Map.put(result, :deleteresults, combineresults(deleteresultset))
       else
-        deletepages(mpid, deletetemplate, deletedoclist, deletefullpageindices, [])
+        result
       end
-      deletefinalresult = combineresults(deleteresultset)
-
-      # Retrun results
-      %{insertresults: insertfinalresult, updateresults: updatefinalresult, deleteresults: deletefinalresult}
     else
       # Parse writedocument into ordered list of contiguous type documents
       orderedwritegroupmaps = BatchWriteSorter.sortordered(writedocument)
